@@ -3,7 +3,7 @@
 ```
 Spin down SAS drives in Unraid. 
 Unraid does a nice job of controlling HDD's energy consumption (and probably 
-longevity) by spinning down drives. Up until Unraid 6.8.3, SAS drives in the
+longevity) by spinning down drives. Up until now (v6.8.3), SAS drives in the
 array would not spin down; the method used by Unraid for spindown affects ATA
 drives only.
 

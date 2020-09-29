@@ -1,0 +1,227 @@
+<?xml version='1.0' standalone='yes'?>
+
+<!DOCTYPE PLUGIN [
+<!ENTITY name      "sas-spindown">
+<!ENTITY author    "doron">
+<!ENTITY version   "0.5">
+<!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
+<!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
+<!ENTITY support   "https://forums.unraid.net/topic/85220-spin-down-sas-drives/">
+<!ENTITY sysloghook "/usr/local/bin/unraid-spinsasdown">
+<!ENTITY syslogconf "/etc/rsyslog.d/99-spinsasdown.conf">
+]>
+
+<PLUGIN  name="&name;"
+         author="&author;"
+         version="&version;"
+         pluginURL="&pluginURL;"
+         support="&support;">
+
+<CHANGES>
+
+###v0.5 2020-09-26 
+- Pack as a plugin
+###v.04 2020-09-22
+- Some more cosmetic tidy-ups
+###v0.3 2020-09-20
+- Typo in message
+###v.02 2020-09-20
+- Fix a stupid packing bug
+- Some code tidy-up                     
+- Include version in messages
+- Log the installation
+</CHANGES>
+
+
+<FILE Run="/bin/bash">
+<INLINE>
+Log () {
+echo "$@"
+logger -t "&name; plugin" "$@"
+}
+
+[ -f /usr/sbin/smartctl.wrapper ] &amp;&amp; {
+	Log "Removing leftover smartctl wrapper..."
+	rm -f /usr/sbin/smartctl.wrapper
+}
+
+[ -f "&syslogconf;" ] &amp;&amp; {
+	Log "Removing leftover syslog conf file from previous installation..."
+	rm -f "&syslogconf;"
+}
+
+[ -f "&sysloghook;" ] &amp;&amp; {
+	Log "Removing leftover syslog hook script from previous installation..."
+	rm -f "&sysloghook;"
+}
+
+rm -f "&plugindir;/README.md"
+
+</INLINE>
+</FILE>
+
+<FILE Name="&plugindir;/README.md" Mode="644">
+<INLINE>
+**Spin Down SAS Drives**
+
+A plugin to spin down SAS drives, until Unraid does organically.
+
+
+This plugin installs two scripts: One which is triggered via an rsyslog hook
+whenever Unraid decides to spin down a drive; if the drive is SAS, it spins it
+down (STANDBY, powermode 3).
+The second is a wrapper for "smartctl", working around its deficiency of not
+supporting the "-n standby" flag for non-ATA drives.
+</INLINE>
+</FILE>
+
+<FILE Name="&sysloghook;" Mode="755">
+<INLINE>
+#!/bin/bash
+
+#
+# Spin down SAS drives - stopgap script until Unraid does organically.
+#
+# This script is initiated via syslog - when Unraid issues the "spindown n" message.
+# If the drive is SAS, the scipt will issue the commands to spin down a SAS drive.
+#
+# Spin up is not implemented - assumed to "just happen" when i/o is directed at drive.
+#
+# @doron 2020-08-30
+VERSION=&version;
+
+MDCMD=/usr/local/sbin/mdcmd
+SG_MAP=/usr/bin/sg_map
+SG_START=/usr/bin/sg_start
+SMARTCTL=/usr/sbin/smartctl
+
+Log () { logger -i -t "SAS Assist v$VERSION" -- "$@" ; }
+
+grep -qe "mdcmd.*spindown" &lt;&lt;&lt; "$1" || exit 0
+
+# Get syslog line without line breaks and whatnot
+LINE=$(paste -sd ' ' &lt;&lt;&lt; $1)
+
+# Obtain Unraid slot number being spun down, from syslog message
+SLOTNUM=$(sed -r 's/.*: *spindown ([[:digit:]]+).*/\1/' &lt;&lt;&lt;  $LINE)
+
+# Get the device name from the slot number
+RDEVNAME=$($MDCMD status | grep "rdevName.${SLOTNUM}=" | sed 's/.*=//')
+
+if [ "$($SMARTCTL -i /dev/$RDEVNAME | 
+	grep protocol | 
+	sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ] 
+	then
+
+  # Figure out /dev/sgN type name from /dev/sdX name
+  SGDEVNAME=$($SG_MAP | grep "/dev/$RDEVNAME\$" | awk '{print $1}' )
+
+  if [ "$SGDEVNAME" != "" ] ; then
+	
+	# Do the magic
+	$SG_START --pc=3 $SGDEVNAME
+	Log "spinning down slot $SLOTNUM, device /dev/$RDEVNAME ($SGDEVNAME)"
+
+  fi
+
+fi
+</INLINE>
+</FILE>
+
+<FILE Name="/usr/sbin/smartctl.wrapper" Mode="755">
+<INLINE>
+#!/bin/bash
+
+# Spin down SAS drives - stopgap scripts until Unraid does organically.
+#
+# This script is a wrapper for "smartctl" - which in 7.1 does not support the "-n standby"
+# flag for SAS drive. This wrapper works around that, by checking whether the drive is SAS
+# and if so, avoid calling smartctl (return silently).
+#
+# @doron 2020-09-10
+VERSION=&version;
+
+SDPARM=/usr/sbin/sdparm
+REALSMART=/usr/sbin/smartctl.real
+
+DEBUG=false
+
+IsSAS () {
+	[ "$($REALSMART -i $1 |
+        grep protocol |
+        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
+}
+
+IsSBY () {
+	grep -iq "standby condition activated" &lt;&lt;&lt; $($SDPARM --command=sense $1)
+}
+
+Log () { logger -i -t "smartctl wrapper v$VERSION" -- "$@" ; }
+
+DEVICE="${@: -1}"
+
+	$DEBUG &amp;&amp; Log "caller is $(cat /proc/$PPID/comm), grandpa is $(cat /proc/$(cat /proc/$PPID/stat | cut -d" " -f4)/comm), device $DEVICE, args \"$@\""
+
+
+if grep -iq -- "-n standby " &lt;&lt;&lt; "$@" &amp;&amp; [ -b $DEVICE ] &amp;&amp; IsSAS $DEVICE ; then 
+
+	if IsSBY $DEVICE ; then
+
+		Log  "SAS device $DEVICE is spun down, smartctl evaded"
+		$DEBUG &amp;&amp; echo "SAS device $DEVICE is spun down, smartctl evaded"
+
+		exit 0
+
+	fi
+
+fi
+
+$REALSMART "$@"
+</INLINE>
+</FILE>
+
+<FILE Name="&syslogconf;" Mode="644">
+<INLINE>
+:msg,contains,"spindown" ^&sysloghook;
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="install">
+<INLINE>
+Log () {
+echo "$@"
+logger -t "&name; plugin" "$@"
+}
+
+Log "Installing a wrapper for smartctl..."
+# Following is coded this way so that you can run this installer multiple times
+[ -f /usr/sbin/smartctl.real ] || cp -p /usr/sbin/smartctl /usr/sbin/smartctl.real
+[ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.wrapper /usr/sbin/smartctl
+
+Log "Installing syslog hook for SAS device spindown..."
+/etc/rc.d/rc.rsyslogd restart &amp;> /dev/null
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+Log () {
+echo "$@"
+logger -t "&name; plugin" "$@"
+}
+
+Log "Removing the smartctl wrapper..."
+[ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.real /usr/sbin/smartctl
+
+Log "Remving the syslog hook..."
+rm -f "&syslogconf;"
+
+/etc/rc.d/rc.rsyslogd restart &amp;> /dev/null
+
+rm -f "&sysloghook;"
+
+rm -fr "&plugindir;"
+</INLINE>
+</FILE>
+
+</PLUGIN>

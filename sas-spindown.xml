@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Containers>
+<Plugin>True</Plugin>
+<PluginURL>https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg</PluginURL>
+<PluginAuthor>doron</PluginAuthor>
+<Beta>False</Beta>
+<Category>Tools:System</Category>
+<Name>SAS Spindown</Name>
+<Description>
+Spin down idle SAS drives the same way SATA drives are spun down.
+</Description>
+<Support>https://forums.unraid.net/topic/97351-plugin-spin-down-sas-drives/</Support>
+<Date>2020-09-26</Date>
+</Containers>

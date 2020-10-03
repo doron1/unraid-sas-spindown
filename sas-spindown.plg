@@ -3,12 +3,13 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.5">
+<!ENTITY version   "0.6">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
-<!ENTITY support   "https://forums.unraid.net/topic/85220-spin-down-sas-drives/">
+<!ENTITY support   "https://forums.unraid.net/topic/97351-plugin-spin-down-sas-drives/">
 <!ENTITY sysloghook "/usr/local/bin/unraid-spinsasdown">
 <!ENTITY syslogconf "/etc/rsyslog.d/99-spinsasdown.conf">
+<!ENTITY debug      "false">
 ]>
 
 <PLUGIN  name="&name;"
@@ -19,6 +20,10 @@
 
 <CHANGES>
 
+###v.06 2020-10-01
+- Update support forum thread (new one, under Plugin Support)
+- Limit action to rotational drives (probably already covered by Unraid but making sure)
+- More code tidy-up
 ###v0.5 2020-09-26 
 - Pack as a plugin
 ###v.04 2020-09-22
@@ -64,7 +69,9 @@ rm -f "&plugindir;/README.md"
 <INLINE>
 **Spin Down SAS Drives**
 
-A plugin to spin down SAS drives, until Unraid does organically.
+A plugin to spin down idle SAS drives, according to Unraid configured spin-down 
+schedule.
+Hopefully a temporary stopgap, until Unraid does it organically.
 
 
 This plugin installs two scripts: One which is triggered via an rsyslog hook
@@ -97,6 +104,16 @@ SMARTCTL=/usr/sbin/smartctl
 
 Log () { logger -i -t "SAS Assist v$VERSION" -- "$@" ; }
 
+IsSAS () {
+        [ "$($SMARTCTL -i $1 |
+        grep -i protocol |
+        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
+}
+
+IsRotational () {
+	[ "$(cat /sys/block/${1#'/dev/'}/queue/rotational)" == 1 ]
+}
+
 grep -qe "mdcmd.*spindown" &lt;&lt;&lt; "$1" || exit 0
 
 # Get syslog line without line breaks and whatnot
@@ -108,9 +125,7 @@ SLOTNUM=$(sed -r 's/.*: *spindown ([[:digit:]]+).*/\1/' &lt;&lt;&lt;  $LINE)
 # Get the device name from the slot number
 RDEVNAME=$($MDCMD status | grep "rdevName.${SLOTNUM}=" | sed 's/.*=//')
 
-if [ "$($SMARTCTL -i /dev/$RDEVNAME | 
-	grep protocol | 
-	sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ] 
+if IsSAS /dev/$RDEVNAME &amp;&amp; IsRotational /dev/$RDEVNAME 
 	then
 
   # Figure out /dev/sgN type name from /dev/sdX name
@@ -144,7 +159,7 @@ VERSION=&version;
 SDPARM=/usr/sbin/sdparm
 REALSMART=/usr/sbin/smartctl.real
 
-DEBUG=false
+DEBUG=&debug;
 
 IsSAS () {
 	[ "$($REALSMART -i $1 |
@@ -193,13 +208,16 @@ echo "$@"
 logger -t "&name; plugin" "$@"
 }
 
+&debug; &amp;&amp; exec 2&gt;&amp;1
+&debug; &amp;&amp; set -x
+
 Log "Installing a wrapper for smartctl..."
 # Following is coded this way so that you can run this installer multiple times
 [ -f /usr/sbin/smartctl.real ] || cp -p /usr/sbin/smartctl /usr/sbin/smartctl.real
 [ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.wrapper /usr/sbin/smartctl
 
 Log "Installing syslog hook for SAS device spindown..."
-/etc/rc.d/rc.rsyslogd restart &amp;> /dev/null
+/etc/rc.d/rc.rsyslogd restart 1&gt;&amp;2
 </INLINE>
 </FILE>
 
@@ -210,13 +228,16 @@ echo "$@"
 logger -t "&name; plugin" "$@"
 }
 
+&debug; &amp;&amp; exec 2&gt;&amp;1
+&debug; &amp;&amp; set -x
+
 Log "Removing the smartctl wrapper..."
 [ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.real /usr/sbin/smartctl
 
 Log "Remving the syslog hook..."
 rm -f "&syslogconf;"
 
-/etc/rc.d/rc.rsyslogd restart &amp;> /dev/null
+/etc/rc.d/rc.rsyslogd restart 1&gt;&amp;2
 
 rm -f "&sysloghook;"
 

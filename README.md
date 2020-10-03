@@ -26,6 +26,9 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2020-10-01 v0.6       Update support forum thread (new one, under Plugin Support)
+                      Limit action to rotational drives (probably already covered by Unraid but making sure)
+                      More code tidy-up
 2020-09-26 V0.5       Pack as a plugin
 2020-09-22 V0.4       Some more cosmetic tidy-ups
 2020-09-20 V0.3       Typo in message

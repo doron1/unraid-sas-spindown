@@ -6,7 +6,7 @@
 <!ENTITY version   "0.5">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
-<!ENTITY support   "https://forums.unraid.net/topic/85220-spin-down-sas-drives/">
+<!ENTITY support   "https://forums.unraid.net/topic/97351-plugin-spin-down-sas-drives/">
 <!ENTITY sysloghook "/usr/local/bin/unraid-spinsasdown">
 <!ENTITY syslogconf "/etc/rsyslog.d/99-spinsasdown.conf">
 ]>

@@ -14,7 +14,6 @@ while asserting that they have been spun down, does not in fact spin them down
 This plugin attempts to ensure that SAS drives spin down and up in sync with Unraid
 schedule (i.e. same as SATA drives).
 </Description>
-<Support>https://forums.unraid.net/topic/97351-plugin-spin-down-sas-drives/</Support>
 <Date>2020-09-26</Date>
 <Icon>https://github.com/doron1/unraid-sas-spindown/raw/master/SAS96.png</Icon>
 </Containers>

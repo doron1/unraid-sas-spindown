@@ -1,0 +1,26 @@
+#!/bin/bash
+#######################################################
+# Is this device on an exclusion list?
+# 2020-11-09-01
+
+IsExcluded () {
+
+##  return 1    #***** Temporary placeholder ****
+
+  local DEV=${1#'/dev/'}
+  local MODEL=$(cat /sys/block/$DEV/device/model | Trim)
+  local REV=$(cat /sys/block/$DEV/device/rev | Trim)
+  local VENDOR=$(cat /sys/block/$DEV/device/vendor | Trim)
+  local CTRLID=$(GetCtrlID $DEV)                # PCI ID
+
+# This is the exception list. If it becomes larger - should improve search
+
+##  [[ "$MODEL" =~ ^ST[0-9]+NM[0-9]+3$ ]] ||    # Constellation ES.3
+##  [[ "$VENDOR" == "SEAGATE" ]] ||
+  [[ "$MODEL" =~ ^HUC[0-9]+CSS600$ ]] ||        # Hitachi HUCnnnnCSS600
+  [[ "$MODEL" =~ X422_[A-Z0-9]{5}600A10 ]] ||   # Netapp rebrands of the Hitachi
+  [[ "${MODEL}:${REV}" =~ MB8000JFECQ:HPD[4-7] ]] ||    # HPE MB8000JFECQ
+  false                                         # End the || chain
+
+}
+#######################################################

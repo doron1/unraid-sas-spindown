@@ -22,10 +22,20 @@ USE AT YOUR OWN RISK.
 
 @doron 2020-09-18
 
-(with help of the great Unraid community, especially @SimonF and @Cilusse)
+(with help from the great Unraid community, @SimonF, @Cilusse and others)
 ```
 ## Change Log:
 ```
+2020-10-07 v0.7       Filter out syslog lines from some SAS devices rejecting ATA standby op (e0) issued by mdcmd
+                      Consistent log messages' tag
+                      Add some debug and testing tools
+                      Implement an exclusion list. Initially for some SEAGATE and HITACHI SAS drives
+                      When smartctl is evaded, give exit code 2 - as smartctl does with ATA. Thanks @segator
+                      Adapt syslog include files to various Unraid configs :-(
+                      Reconfigure filter each time rsyslog.conf is modified.
+                      Many other fixes and improvements, major code reorg
+   Thanks @SimonF for great feedback and suggesstions, thanks @jowe and others for testing efforts.
+
 2020-10-01 v0.6       Update support forum thread (new one, under Plugin Support)
                       Limit action to rotational drives (probably already covered by Unraid but making sure)
                       More code tidy-up

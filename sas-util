@@ -1,0 +1,260 @@
+#!/bin/bash
+
+# SAS Util: Tool to list SAS drives / controllers on the system, and potentially
+# measure various SAS drives' response to "set standby_z" command.
+#
+# Some drives respond "as expected", which is a temporary spindle spin-down
+# which is terminated (spin up) by the next i/o against the drive. Others
+# go to permanent idle state which require an explicit "start" command. 
+# Yet others just ignore the command.
+#
+# Currently (2020-10-10) it appears this is not just drive dependent, but
+# could be controller-dependent or maybe even combo-dependent. This tool
+# was built to collect this info.
+#
+# Unraid environment is assumed.
+#
+# (c) 2020 @doron - CC BY-SA 4.0
+
+VERSION=20201111.01 # Tool version
+
+SMARTCTL=/usr/sbin/smartctl
+SDPARM=/usr/sbin/sdparm
+LSPCI=/sbin/lspci
+MDCMD=/usr/local/sbin/mdcmd
+SG_START=/usr/bin/sg_start
+DD=/usr/bin/dd
+JQ=/usr/bin/jq
+
+UNRAIDVAR=/var/local/emhttp
+
+OUTPUTJSON=/tmp/sas-util-out
+
+
+Main () {
+
+Tell "SAS Spindown Utility (v$VERSION)"
+
+if [[ "${1,,}" == "test" ]] ; then
+  TESTING=true
+else
+  TESTING=false
+fi
+
+
+###############
+# Collect all mechanical SAS drives
+SASDRIVES=""
+
+for DISK in $(ls -la /dev/disk/by-path/*-sas-* | egrep -v "part[0-9]+ " | sed 's/.*\///') ; do
+
+  if IsSAS $DISK && IsRotational $DISK ; then 
+	SASDRIVES+=" $DISK" 
+  fi
+
+done
+
+if [ "$SASDRIVES" == "" ] ; then
+  ScramWith "No SAS drives detected."
+fi
+
+if $TESTING ; then
+
+  ###############
+  # We do testing only when the array is stopped
+  if IsArrayStarted ; then
+    ScramWith "SAS spindown testing must be run with the array stopped."
+  fi
+
+  Tell "SAS spin-down testing will be performed on: $SASDRIVES. Please confirm!"
+  Yesno
+
+fi
+
+###############
+
+SUMMARY="" ; JSONDATA="" ; CONTROLLERS=""
+
+for DISK in $SASDRIVES ; do
+
+  MODEL=$(cat /sys/block/$DISK/device/model | Trim)
+
+  CTRLID=$(
+	cd $(readlink -m /sys/block/$DISK | sed 's=/host[0-9a-f].*==')	# e.g. /sys/devices/pci0000:00/0000:00:17.0/0000:13:00.0
+	cat vendor device subsystem_vendor subsystem_device | 
+	paste -sd':' |
+	sed 's/0x//g'							# 0x1234 => 1234
+	)
+  CONTROLLERS+=" $(GetCtrlSlot $DISK)"
+
+  TIME="" ; RESULT=" n/a "
+
+  if $TESTING ; then
+
+    Tellnr "Testing $DISK ($MODEL): "
+
+    ## First, make sure the drive is spun up
+    Tellnr "Ensuring drive is spinning..."
+    $SMARTCTL -x /dev/$DISK &> /dev/null
+    sleep 1s
+
+    ## This should spin down the device
+    Tellnr "Issuing the spin-down command, and waiting a few seconds..."
+    $SG_START --pc=3 --readonly /dev/$DISK
+    sleep 3s
+
+    SENSE1=$(sdparm --command=sense /dev/$DISK | tr '\n' '#' | sed -e 's/\s\+/ /g' -e 's/#$//')
+    
+
+    if grep -iq "logical unit not ready" <<< $SENSE1 ; then
+	  Tellnr "Drive seems to have STOPped; restarting..."
+	  RESULT=stopping
+	  $SG_START -s --readonly /dev/$DISK
+
+    elif IsSBY $DISK ; then
+	  Tellnr "...spun down. Issuing i/o against drive..."
+
+	  echo 1 > /proc/sys/vm/drop_caches	# Make sure Linux not reading from cache
+
+	  STIME=$(date +%s%N)
+	  # Copy some data, randomizing read point to avert controller caching
+	  $DD if=/dev/$DISK of=/dev/null bs=4K count=1 skip=$(( $RANDOM * 1024 )) &> /dev/null
+	  DDRC=$?
+	  ETIME=$(date +%s%N)
+
+	  TIME=$(( ($ETIME - $STIME) / 1000000 ))	# From nanosec to milisec
+
+	  if [ $DDRC != 0 ] ; then
+		  RESULT="failed"
+		  Tellnr "i/o to drive seems to fail - restarting..."
+		  $SG_START -s --readonly /dev/$DISK
+	  elif [ $TIME -lt 300 ] ; then
+		  RESULT="toofast"
+	  else
+		  RESULT="success"
+	  fi
+
+    else
+	  Tellnr "Drive does not seem to spin down..."
+	  RESULT=ignored
+
+    fi
+    Tellnr "...all done.\n\n"
+  fi
+
+  SUMMARY+=$(echo -e "\n$DISK\t| $MODEL\t| $CTRLID\t| $RESULT\t| $TIME")
+
+  JSONDATA+="{ \"drive\": {  \"model\": \"$MODEL\",  
+	\"controller-id\": \"$CTRLID\",  
+	\"controller-slot\": \"$(GetCtrlSlot $DISK)\"  " 
+
+  if $TESTING ; then 
+	JSONDATA+=", 
+	\"sense\": \"$SENSE1\",   
+	\"result\": \"$RESULT\", 
+	\"time\": \"$TIME\"  " 
+  fi
+
+  JSONDATA+=" } },"
+
+done
+
+JSONDATA=${JSONDATA%,}		# Remove trailing comma
+
+
+Tell "\n$SUMMARY"
+
+## Tell "\n\nIf you would you like to add any text to the test results, please do so now:"
+## read EXTRATEXT
+## EXTRATEXT=$(tr "\'\"" ' ' <<< $EXTRATEXT)
+
+CONTROLLERS=$(echo "$CONTROLLERS" | tr ' ' '\n' | sort | uniq)
+
+
+$JQ . <<< $(echo "{\"utility-run\": { \"date\": \"$(date +"%Y%m%d-%H:%M %Z")\", \"version\": \"$VERSION\" , \"message\":\"$EXTRATEXT\", \"drives\": 
+	[ $JSONDATA ] } }"
+	) > $OUTPUTJSON
+
+
+# JSON-ize lspci for SAS controllers :-)
+$JQ . <<< $(echo "{ \"controllers\": [ 
+	$(for C in $CONTROLLERS ; do 
+		echo -n "{ \"controller\": { 
+			$($LSPCI -vvqnnmms $C | 
+			sed -r 's/(.+):\s+(.*)/\"\1\": \"\2\",/' | 
+			paste -sd ' ' | 
+			sed -e 's/,\s*$//') } } ,"
+	done | sed -e 's/,$//') ] }"
+	) >> $OUTPUTJSON
+
+Tell "Run completed. The output is at $OUTPUTJSON."
+
+}
+
+
+
+
+########## Functions
+
+# Trim enclosing whitespaces off a string
+Trim () { sed -e 's/^\s*//' -e 's/\s*$//' ; }
+
+# Exit with error message
+ScramWith () {
+
+  Tell "Error: $*"
+  Tell "Now exiting."
+  exit 2
+
+}
+
+# Issue message to user
+Tell() {
+  echo -e "\n$*"
+}
+
+# Issue message to user w/o newlines
+Tellnr() {
+  echo -en "$*"
+}
+
+# Ask for confirmation
+Yesno() {
+  local RESP
+  Tellnr "\nType upper-case YES to proceed:"
+  read RESP
+  [[ "$RESP" == "YES" ]] && return
+  ScramWith "Mission aborted by user."
+}
+
+# Is this a SAS device?
+IsSAS () {
+        [ "$($SMARTCTL -i /dev/${1#'/dev/'} |
+        grep -i protocol |
+        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
+}
+
+# Is this a rotational (vs. solid state) device?
+IsRotational () {
+        [ "$(cat /sys/block/${1#'/dev/'}/queue/rotational)" == 1 ]
+}
+
+# Is this SAS device spun down (standby_z)?
+IsSBY () {
+        grep -iq "standby condition activated" <<< $($SDPARM --command=sense /dev/${1#'/dev/'})
+}
+
+# Get controller slot ID from an rdevice
+GetCtrlSlot () {
+
+  readlink -m /sys/block/${1#'/dev/'} |
+        sed -e 's=.*devices/pci[0-9a-f:]*/[0-9a-f:.]\+/[0-9a-f]*:==' -e 's=/.*=='
+}
+
+IsArrayStarted () {
+
+  ls /mnt/disk[1-9]* &>/dev/null ||
+	[[ ! $(grep -i '^mdstate' $UNRAIDVAR/var.ini) =~ .*=\"STOPPED\" ]]
+}
+
+Main "$@"

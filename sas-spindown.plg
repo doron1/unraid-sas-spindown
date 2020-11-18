@@ -3,13 +3,17 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.6">
+<!ENTITY version   "0.7">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
+<!ENTITY pluginpermdir "/boot/config/plugins/&name;">
 <!ENTITY support   "https://forums.unraid.net/topic/97351-plugin-spin-down-sas-drives/">
 <!ENTITY sysloghook "/usr/local/bin/unraid-spinsasdown">
-<!ENTITY syslogconf "/etc/rsyslog.d/99-spinsasdown.conf">
+<!ENTITY syslogconf "99-spinsasdown.conf">
 <!ENTITY debug      "false">
+<!ENTITY debugfile  "/tmp/spindownsas-debug">
+<!ENTITY exclusionsURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/exclusions">
+<!ENTITY utilURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-util">
 ]>
 
 <PLUGIN  name="&name;"
@@ -19,6 +23,18 @@
          support="&support;">
 
 <CHANGES>
+
+###v.07 2020-10-07
+- Filter out syslog lines from some SAS devices rejecting ATA standby op (e0) issued by mdcmd
+- Consistent log messages' tag
+- Add some debug and testing tools
+- Implement an exclusion list. Initially for some SEAGATE and HITACHI SAS drives
+- When smartctl is evaded, give exit code 2 - as smartctl does with ATA. Thanks @segator
+- Adapt syslog include files to various Unraid configs :-(
+  Reconfigure filter each time rsyslog.conf is modified.
+- Other fixes and improvements, major code reorg
+
+Thanks @SimonF for great feedback and suggesstions, thanks @jowe and others for testing efforts.
 
 ###v.06 2020-10-01
 - Update support forum thread (new one, under Plugin Support)
@@ -45,14 +61,16 @@ echo "$@"
 logger -t "&name; plugin" "$@"
 }
 
+Log &name; v&version; installing
+
 [ -f /usr/sbin/smartctl.wrapper ] &amp;&amp; {
 	Log "Removing leftover smartctl wrapper..."
 	rm -f /usr/sbin/smartctl.wrapper
 }
 
-[ -f "&syslogconf;" ] &amp;&amp; {
+[ -f /etc/rsyslog.d/&syslogconf; ] &amp;&amp; {
 	Log "Removing leftover syslog conf file from previous installation..."
-	rm -f "&syslogconf;"
+	rm -f "/etc/rsyslog.d/&syslogconf;"
 }
 
 [ -f "&sysloghook;" ] &amp;&amp; {
@@ -60,7 +78,10 @@ logger -t "&name; plugin" "$@"
 	rm -f "&sysloghook;"
 }
 
-rm -f "&plugindir;/README.md"
+# Remove the syslog configurator if running in bg
+pkill sas-spindown
+
+rm -f &plugindir;/*
 
 </INLINE>
 </FILE>
@@ -74,11 +95,196 @@ schedule.
 Hopefully a temporary stopgap, until Unraid does it organically.
 
 
-This plugin installs two scripts: One which is triggered via an rsyslog hook
-whenever Unraid decides to spin down a drive; if the drive is SAS, it spins it
-down (STANDBY, powermode 3).
+This plugin installs two main components: One which is triggered via an rsyslog
+hook whenever Unraid decides to spin down a drive; if the drive is SAS, it spins
+it down (STANDBY, powermode 3).
 The second is a wrapper for "smartctl", working around its deficiency of not
 supporting the "-n standby" flag for non-ATA drives.
+</INLINE>
+</FILE>
+
+<FILE Name="&plugindir;/exclusions" Mode="755">
+<INLINE>
+#!/bin/bash
+#######################################################
+# Is this device on an exclusion list?
+# Bundled, v&version;
+
+IsExcluded () {
+
+##  return 1	#***** Temporary placeholder ****
+
+  local DEV=${1#'/dev/'}
+  local MODEL=$(cat /sys/block/$DEV/device/model | Trim)
+  local REV=$(cat /sys/block/$DEV/device/rev | Trim)
+  local VENDOR=$(cat /sys/block/$DEV/device/vendor | Trim)
+  local CTRLID=$(GetCtrlID $DEV)		# PCI ID
+
+# This is the exception list. If it becomes larger - should improve search
+
+##  [[ "$MODEL" =~ ^ST[0-9]+NM[0-9]+3$ ]] ||	# Constellation ES.3
+##  [[ "$VENDOR" == "SEAGATE" ]] ||
+  [[ "$MODEL" =~ ^HUC[0-9]+CSS600$ ]] ||	# Hitachi HUCnnnnCSS600
+  [[ "$MODEL" =~ X422_[A-Z0-9]{5}600A10 ]] ||	# Netapp rebrands of the Hitachi
+  [[ "${MODEL}:${REV}" =~ MB8000JFECQ:HPD[4-7] ]] ||	# HPE MB8000JFECQ
+  false						# End the || chain
+
+}
+#######################################################
+</INLINE>
+</FILE>
+
+<FILE Name="&plugindir;/functions" Mode="755">
+<INLINE>
+#!/bin/bash
+
+# Shared functions for SAS Spindown plugin
+# @doron 2010-10-08
+
+VERSION=&version;
+
+MDCMD=/usr/local/sbin/mdcmd
+SG_MAP=/usr/bin/sg_map
+SG_START=/usr/bin/sg_start
+SMARTCTL=/usr/sbin/smartctl
+REALSMART=/usr/sbin/smartctl.real
+SDPARM=/usr/sbin/sdparm
+LSPCI=/sbin/lspci
+DEBUG=&debug;
+[ -f &debugfile; ] &amp;&amp; DEBUG=true
+
+# Trim enclosing whitespaces off a string
+Trim () { sed -e 's/^\s*//' -e 's/\s*$//' ; }
+
+Log () { logger -t "SAS Assist v$VERSION" -- "$@" ; }
+
+. &plugindir;/exclusions
+
+# Is this a SAS device?
+IsSAS () {
+        [ "$($REALSMART -i /dev/${1#'/dev/'} |
+        grep -i protocol |
+        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
+}
+
+# Is this a rotational (vs. solid state) device?
+IsRotational () {
+        [ "$(cat /sys/block/${1#'/dev/'}/queue/rotational)" == 1 ]
+}
+
+# Is this SAS device spun down (standby_z)?
+IsSBY () {
+	$SDPARM --command=sense /dev/${1#'/dev/'} |
+	grep -iq "standby condition activated"
+}
+
+# Get controller slot ID of an rdevice
+GetCtrlSlot () {
+
+  readlink -m /sys/block/${1#'/dev/'} |
+        sed -e 's=.*devices/pci[0-9a-f:]*/[0-9a-f:.]\+/[0-9a-f]*:==' -e 's=/.*=='
+}
+
+# Get controller PCI ID - primary and subsystem: 0000:0000:0000:0000
+GetCtrlID () {
+  (
+  cd $(readlink -m /sys/block/${1#'/dev/'} | sed 's=/host[0-9a-f].*==')
+  # e.g. /sys/devices/pci0000:00/0000:00:17.0/0000:13:00.0
+
+  cat vendor device subsystem_vendor subsystem_device |
+        paste -sd':' |
+        sed 's/0x//g'
+  )
+}
+</INLINE>
+</FILE>
+
+<FILE Name="&plugindir;/sas-spindown-config-syslog" Mode="755">
+<INLINE>
+#!/bin/bash
+
+#
+# Spin down SAS drives plugin - config syslog
+#
+# This script will config the syslog hook for the spindown. It is needed because
+# vanilla Unraid and Dynamix create multiple flavors of rsyslog.conf and it is 
+# not possible to have one include file that will address all situations.
+
+# This script is run by (a) plugin installation and (b) inotify hook, whenever
+# /etc/rsyslog.conf is changed.
+#
+#
+# v&version;
+# @doron 2020-10-20
+
+Main () {
+. &plugindir;/functions
+
+CFG=/etc/rsyslog.conf
+CFGDIR=/etc/rsyslog.d
+
+ME=$(readlink -f ${BASH_SOURCE[0]})
+
+
+if [ "${1,,}" == "install" ] ; then
+
+   ConfigSyslog
+   echo "$ME" | at -M now
+
+else
+
+  # Any time rsyslog.conf is accessed, do it again
+  while inotifywait -q /etc/rsyslog.conf ; do
+
+	ConfigSyslog
+
+  done
+
+  Log "inotity failed for rsyslog.conf - will not auto-configure syslog hook upon changes"
+
+fi
+
+}
+
+ConfigSyslog() {
+
+$DEBUG &amp;&amp; Log "debug: syslog hook (re)config triggered"
+
+TMP=$(mktemp)
+
+if ! grep -qi '^$ruleset' $CFG ; then
+   # No RuleSet in file; remove all ruleset indicators
+   FILTER="sed -e ""/\$RuleSet/d"" -e ""/REMOTECONFIG/,999d"""
+elif grep -qi '^$ruleset remote' $CFG ; then
+   # Remote RuleSet exists
+   FILTER="cat"
+elif grep -qi '^$ruleset local' $CFG ; then
+   # Remote RuleSet not active - leave only settings for "local"
+   FILTER="sed -e ""/REMOTECONFIG/,999d"""
+else
+   Log "Error: $CFG format unrecognized, will not install syslog hook."
+   echo "Error: $CFG format unrecognized, will not install syslog hook."
+   exit 2
+fi
+
+cat &plugindir;/&syslogconf; |
+  $FILTER > $TMP
+chmod 644 $TMP
+
+# If syslog config does not exist OR should be modified, update file and restart daemon
+if [ ! -f $CFGDIR/&syslogconf; ] || ! cmp -s $TMP $CFGDIR/&syslogconf; ; then
+
+   Log "Configuring syslog filters at $CFGDIR/&syslogconf;"
+   cp $TMP $CFGDIR/&syslogconf;
+   sleep 2s
+   /etc/rc.d/rc.rsyslogd restart 1&gt;&amp;2
+
+fi
+
+rm -f $TMP
+}
+
+Main "$@"
 </INLINE>
 </FILE>
 
@@ -94,25 +300,12 @@ supporting the "-n standby" flag for non-ATA drives.
 #
 # Spin up is not implemented - assumed to "just happen" when i/o is directed at drive.
 #
+# v&version;
 # @doron 2020-08-30
-VERSION=&version;
 
-MDCMD=/usr/local/sbin/mdcmd
-SG_MAP=/usr/bin/sg_map
-SG_START=/usr/bin/sg_start
-SMARTCTL=/usr/sbin/smartctl
+. &plugindir;/functions
 
-Log () { logger -i -t "SAS Assist v$VERSION" -- "$@" ; }
-
-IsSAS () {
-        [ "$($SMARTCTL -i $1 |
-        grep -i protocol |
-        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
-}
-
-IsRotational () {
-	[ "$(cat /sys/block/${1#'/dev/'}/queue/rotational)" == 1 ]
-}
+$DEBUG &amp;&amp; Log "debug: syslog filter triggered"
 
 grep -qe "mdcmd.*spindown" &lt;&lt;&lt; "$1" || exit 0
 
@@ -125,8 +318,18 @@ SLOTNUM=$(sed -r 's/.*: *spindown ([[:digit:]]+).*/\1/' &lt;&lt;&lt;  $LINE)
 # Get the device name from the slot number
 RDEVNAME=$($MDCMD status | grep "rdevName.${SLOTNUM}=" | sed 's/.*=//')
 
-if IsSAS /dev/$RDEVNAME &amp;&amp; IsRotational /dev/$RDEVNAME 
+$DEBUG &amp;&amp; Log "debug: syslog filter, R=$RDEVNAME S=$SLOTNUM"
+
+if IsSAS $RDEVNAME &amp;&amp; 
+   IsRotational $RDEVNAME
 	then
+
+  if IsExcluded $RDEVNAME
+	then
+
+	Log "disk $SLOTNUM (/dev/$RDEVNAME) not supported by SAS spindown plugin (excluded), not spun down"
+	exit 0
+  fi
 
   # Figure out /dev/sgN type name from /dev/sdX name
   SGDEVNAME=$($SG_MAP | grep "/dev/$RDEVNAME\$" | awk '{print $1}' )
@@ -134,12 +337,14 @@ if IsSAS /dev/$RDEVNAME &amp;&amp; IsRotational /dev/$RDEVNAME
   if [ "$SGDEVNAME" != "" ] ; then
 	
 	# Do the magic
-	$SG_START --pc=3 $SGDEVNAME
+	$DEBUG &amp;&amp; Log "debug: $SG_START --readonly --pc=3 $SGDEVNAME"
+	$SG_START --readonly --pc=3 $SGDEVNAME
 	Log "spinning down slot $SLOTNUM, device /dev/$RDEVNAME ($SGDEVNAME)"
 
   fi
 
 fi
+exit 0
 </INLINE>
 </FILE>
 
@@ -153,39 +358,24 @@ fi
 # flag for SAS drive. This wrapper works around that, by checking whether the drive is SAS
 # and if so, avoid calling smartctl (return silently).
 #
+# v&version;
 # @doron 2020-09-10
-VERSION=&version;
 
-SDPARM=/usr/sbin/sdparm
-REALSMART=/usr/sbin/smartctl.real
-
-DEBUG=&debug;
-
-IsSAS () {
-	[ "$($REALSMART -i $1 |
-        grep protocol |
-        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
-}
-
-IsSBY () {
-	grep -iq "standby condition activated" &lt;&lt;&lt; $($SDPARM --command=sense $1)
-}
-
-Log () { logger -i -t "smartctl wrapper v$VERSION" -- "$@" ; }
+. &plugindir;/functions
 
 DEVICE="${@: -1}"
 
-	$DEBUG &amp;&amp; Log "caller is $(cat /proc/$PPID/comm), grandpa is $(cat /proc/$(cat /proc/$PPID/stat | cut -d" " -f4)/comm), device $DEVICE, args \"$@\""
+$DEBUG &amp;&amp; Log "debug: smartctl wrapper caller is $(cat /proc/$PPID/comm), grandpa is $(cat /proc/$(cat /proc/$PPID/stat | cut -d" " -f4)/comm), device $DEVICE, args \"$@\""
 
 
-if grep -iq -- "-n standby " &lt;&lt;&lt; "$@" &amp;&amp; [ -b $DEVICE ] &amp;&amp; IsSAS $DEVICE ; then 
+if egrep -iq -- "-n\s+standby\s|--nocheck=standby" &lt;&lt;&lt; "$@" &amp;&amp; [ -b $DEVICE ] &amp;&amp; IsSAS $DEVICE ; then 
 
 	if IsSBY $DEVICE ; then
 
-		Log  "SAS device $DEVICE is spun down, smartctl evaded"
-		$DEBUG &amp;&amp; echo "SAS device $DEVICE is spun down, smartctl evaded"
+		$DEBUG &amp;&amp; Log  "debug: SAS device $DEVICE is spun down, smartctl evaded"
+		echo "SAS device $DEVICE is spun down, smartctl evaded"
 
-		exit 0
+		exit 2		# Match smartctl's exit code, thanks @segator
 
 	fi
 
@@ -195,9 +385,95 @@ $REALSMART "$@"
 </INLINE>
 </FILE>
 
-<FILE Name="&syslogconf;" Mode="644">
+<FILE Name="&plugindir;/&syslogconf;" Mode="644">
 <INLINE>
-:msg,contains,"spindown" ^&sysloghook;
+# SAS Spindown Assist Plugin v&version;
+$RuleSet local
+
+if $msg contains "spindown" and $.sasdone != 1 then {
+	^/usr/local/bin/unraid-spinsasdown
+	set $.sasdone = 1 ;
+	}
+	
+# Some SAS devices spew errors when hit with ATA spindown opcode; filter out
+if re_match($msg, ".*error: mdcmd.*Input/output error \\(5\\): write.*") or
+   re_match($msg, ".*md: do_drive_cmd:.*ATA_OP e[03] ioctl error.*") 
+   then stop
+
+#REMOTECONFIG do not move/remove this line
+$RuleSet remote
+if re_match($msg, ".*error: mdcmd.*Input/output error \\(5\\): write.*") or
+   re_match($msg, ".*md: do_drive_cmd:.*ATA_OP e[03] ioctl error.*") 
+   then stop
+</INLINE>
+</FILE>
+
+<FILE Name="&plugindir;/sas-spindown-diag.sh" Mode="755">
+<INLINE>
+#!/bin/bash
+
+# Generate diagnostics for supporting the SAS spindown assist plugin.
+# @doron 2020-10-10 (!)
+
+VERSION=&version;
+DIAGFILE=/tmp/sas-spindown-diag.zip
+
+rm -f $DIAGFILE
+
+TDIR=$(mktemp -d)
+
+mdcmd status | sed -r 's/(^rdevid.*=|^diskid.*=).*/\1XXredactedXX/i' &gt; $TDIR/mdcmd-status
+
+sg_map &gt; $TDIR/sg_map
+
+lspci -vnnmm &gt; $TDIR/lspci 2&gt;/dev/null
+lspci -vvnn &gt; $TDIR/lspcivv 2&gt;/dev/null
+
+echo "SAS Spindown Diagnostic Tool v$VERSION" &gt; $TDIR/version
+
+mdcmd status | grep -i "^rdevname." | sed -r 's/^rdevname\.([0-9]+)=(\S*)/\1 \2/i' |
+	while read NUM RDEV ; do
+
+	    if [ -b /dev/$RDEV ] ; then
+
+		echo '================='
+		echo "Slot $NUM device /dev/$RDEV"
+		echo
+		ls -lad /sys/block/$RDEV
+		lspci -nns $(readlink -m /sys/block/$RDEV | sed -e 's=.*devices/pci[0-9a-f:]*/[0-9a-f:.]\+/[0-9a-f]*:==' -e 's=/.*==')
+		echo '==='
+		echo "smartctl -i /dev/$RDEV" 
+		smartctl -i /dev/$RDEV | sed -r 's/^(serial number:\s*).*/\1XXredactedXX/i'
+		echo '==='
+		echo "sdparm --command=sense /dev/$RDEV"
+		sdparm --command=sense /dev/$RDEV
+		echo '==='
+		echo "sdparm --flexible -6 -v -S -p po /dev/$RDEV"
+		sdparm --flexible -6 -v -S -p po /dev/$RDEV
+		echo '==='
+		echo "/sys/block/$RDEV/device/vendor=\"$(cat /sys/block/$RDEV/device/vendor)\""
+		echo "/sys/block/$RDEV/device/model=\"$(cat /sys/block/$RDEV/device/model)\""
+
+	    fi
+
+	done &amp;&gt; $TDIR/diag
+
+cp -p /etc/rsyslog.d/*.conf /etc/rsyslog.conf $TDIR/
+cp -p /usr/local/bin/unraid-spinsasdown $TDIR/
+cp -p /usr/sbin/smartctl $TDIR/
+mkdir $TDIR/plugindir
+cp -p &plugindir;/* $TDIR/plugindir
+
+rsyslogd -nd &amp;&gt; $TDIR/rsyslogd-nd-out
+
+cd $TDIR
+zip -qr $DIAGFILE *
+
+rm -fr $TDIR
+
+
+echo "*** SAS-Spindown plugin diagnostics now available in $DIAGFILE."
+
 </INLINE>
 </FILE>
 
@@ -217,7 +493,28 @@ Log "Installing a wrapper for smartctl..."
 [ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.wrapper /usr/sbin/smartctl
 
 Log "Installing syslog hook for SAS device spindown..."
-/etc/rc.d/rc.rsyslogd restart 1&gt;&amp;2
+&plugindir;/sas-spindown-config-syslog install
+
+wget -q -t 3 -O &plugindir;/exclusions.latest &exclusionsURL; &amp;&amp; {
+
+  Log "Retrieved the latest exclusions file..."
+  install &plugindir;/exclusions.latest -m 755 -Dt &pluginpermdir;
+}
+[ -f &pluginpermdir;/exclusions.latest ] &amp;&amp; {
+  Log "Installing most recent exclusions file..."
+  mv &plugindir;/exclusions &plugindir;/exclusions.bundled
+  install &pluginpermdir;/exclusions.latest -m 755 &plugindir;/exclusions
+}
+
+wget -q -t 3 -O &plugindir;/sas-util &utilURL; &amp;&amp; {
+  Log "Retrieved the latest sas-util..."
+  install &plugindir;/sas-util -m 755 -Dt &pluginpermdir;
+}
+[ -f &pluginpermdir;/sas-util ] &amp;&amp; {
+  Log "Installing sas-util..."
+  install &pluginpermdir;/sas-util -m 755 -Dt &plugindir;
+}
+exit 0
 </INLINE>
 </FILE>
 
@@ -234,8 +531,11 @@ logger -t "&name; plugin" "$@"
 Log "Removing the smartctl wrapper..."
 [ -f /usr/sbin/smartctl.real ] &amp;&amp; mv /usr/sbin/smartctl.real /usr/sbin/smartctl
 
-Log "Remving the syslog hook..."
-rm -f "&syslogconf;"
+Log "Removing the syslog hook..."
+# Remove the syslog configurator if running in bg
+pkill sas-spindown
+sleep 2s
+rm -f "/etc/rsyslog.d/&syslogconf;"
 
 /etc/rc.d/rc.rsyslogd restart 1&gt;&amp;2
 

@@ -19,6 +19,7 @@ IsExcluded () {
 ##  [[ "$VENDOR" == "SEAGATE" ]] ||
   [[ "$MODEL" =~ ^HUC[0-9]+CSS600$ ]] ||	# Hitachi HUCnnnnCSS600
   [[ "$MODEL" =~ X422_[A-Z0-9]{5}600A10 ]] ||	# Netapp rebrands of the Hitachi
+  [[ "$MODEL" =~ X412_[A-Z0-9]{5}560A15 ||	# Additional Netapp rebrands of the Hitachi
   [[ "${MODEL}:${REV}" =~ MB8000JFECQ:HPD[4-7] ]] ||	# HPE MB8000JFECQ
   false						# End the || chain
 

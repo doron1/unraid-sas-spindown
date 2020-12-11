@@ -3,18 +3,24 @@
 ```
 Spin down SAS drives in Unraid. 
 Unraid does a nice job of controlling HDD's energy consumption (and probably 
-longevity) by spinning down drives. Up until now (v6.8.3), SAS drives in the
-array would not spin down; the method used by Unraid for spindown affects ATA
-drives only.
+longevity) by spinning down drives. That works very well for SATA drives; 
+however SAS drives are quite peculiar in their power mode controls. Specifically
+they do not respond to ATA standby (spin down) commands.
 
-This is a temporary(...) stopgap until Limetech adds this into mainline Unraid.
-Packaged as an Unraid plugin for convenience.
+This plugin add SAS drive spin down support to Unraid. 
 
-The plugin installs two scripts: One which is triggered via an rsyslog hook
-whenever Unraid decides to spin down a drive; if the drive is SAS, it spins it
-down (STANDBY, powermode 3).
-The second is a wrapper for "smartctl", working around its deficiency of not
-supporting the "-n standby" flag for non-ATA drives.
+The plugin is installed in two very differnt ways, depending on the Unraid OS
+version. For versions up until v6.8.3, the plugin installs two components: 
+One which is triggered via an rsyslog hook whenever Unraid decides to spin down 
+a drive, and does "the right thing" for SAS. The second is a wrapper for "smartctl", 
+working around its deficiency of not supporting the "-n standby" flag for non-ATA drives.
+From version 6.9.0, Unraid OS already includes the wrapper, and implemented a modular
+script for spin up/down control. For those versions, the plugin enhances the functionality
+via that mechanism.
+
+Some SAS drives and controllers do not respond favorably to the SAS STANDBY command
+(POWERMODE 3). Towards that end, the plugin also implements an exclusion filter, to
+try and avoid all sorts of red x situations.
 
 This software is provided with no warranty, either expressed or implied. 
 It works for me, it may or may not work for you. 
@@ -26,6 +32,14 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2020-12-11 v0.8       Update for Unraid 6.9.0, use new spin up/down hook. Plugin now supports 
+                      both old and new systems.
+                      When spinning down off of rsyslog, send the sg_start command to the background 
+                      so as not to block rsyslog if things get funny.
+                      Use sdparm rather than smartctl to detect if a drive is SAS.
+                      If smartctl version >= 7.2 or Unraid >= 6.9.0-rc1, do not install wrapper.
+                      Other fixes and imrpovements...
+
 2020-10-07 v0.7       Filter out syslog lines from some SAS devices rejecting ATA standby op (e0) issued by mdcmd
                       Consistent log messages' tag
                       Add some debug and testing tools

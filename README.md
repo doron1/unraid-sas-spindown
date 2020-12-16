@@ -32,6 +32,8 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2020-12-16 v0.81      In some configurations, SATA drives were mis-classified as SAS drives
+
 2020-12-11 v0.8       Update for Unraid 6.9.0, use new spin up/down hook. Plugin now supports 
                       both old and new systems.
                       When spinning down off of rsyslog, send the sg_start command to the background 

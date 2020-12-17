@@ -16,7 +16,7 @@
 #
 # (c) 2020 @doron - CC BY-SA 4.0
 
-VERSION=20201111.01 # Tool version
+VERSION=20201217.01 # Tool version
 
 SMARTCTL=/usr/sbin/smartctl
 SDPARM=/usr/sbin/sdparm
@@ -25,6 +25,12 @@ MDCMD=/usr/local/sbin/mdcmd
 SG_START=/usr/bin/sg_start
 DD=/usr/bin/dd
 JQ=/usr/bin/jq
+
+DEBUG=false
+#DEBUG=true
+
+ME=$(basename $0)
+MYPID=$$
 
 UNRAIDVAR=/var/local/emhttp
 
@@ -41,6 +47,9 @@ else
   TESTING=false
 fi
 
+trap "Cleanup" EXIT
+
+shopt -s nocasematch
 
 ###############
 # Collect all mechanical SAS drives
@@ -69,6 +78,8 @@ if $TESTING ; then
   Tell "SAS spin-down testing will be performed on: $SASDRIVES. Please confirm!"
   Yesno
 
+  InstallHook		Install a blocker to "smartctl"
+
 fi
 
 ###############
@@ -95,7 +106,7 @@ for DISK in $SASDRIVES ; do
 
     ## First, make sure the drive is spun up
     Tellnr "Ensuring drive is spinning..."
-    $SMARTCTL -x /dev/$DISK &> /dev/null
+    $DD if=/dev/$DISK of=/dev/null bs=4K count=1 &> /dev/null
     sleep 1s
 
     ## This should spin down the device
@@ -103,13 +114,13 @@ for DISK in $SASDRIVES ; do
     $SG_START --pc=3 --readonly /dev/$DISK
     sleep 3s
 
-    SENSE1=$(sdparm --command=sense /dev/$DISK | tr '\n' '#' | sed -e 's/\s\+/ /g' -e 's/#$//')
+    SENSE1=$(sdparm -C sense /dev/$DISK | Oneliner)
     
 
-    if grep -iq "logical unit not ready" <<< $SENSE1 ; then
+    if [[ "$SENSE1" =~ "logical unit not ready" ]] ; then
 	  Tellnr "Drive seems to have STOPped; restarting..."
 	  RESULT=stopping
-	  $SG_START -s --readonly /dev/$DISK
+    	  $SG_START --pc=1 --readonly /dev/$DISK
 
     elif IsSBY $DISK ; then
 	  Tellnr "...spun down. Issuing i/o against drive..."
@@ -118,7 +129,7 @@ for DISK in $SASDRIVES ; do
 
 	  STIME=$(date +%s%N)
 	  # Copy some data, randomizing read point to avert controller caching
-	  $DD if=/dev/$DISK of=/dev/null bs=4K count=1 skip=$(( $RANDOM * 1024 )) &> /dev/null
+	  $DD if=/dev/$DISK of=/dev/null bs=4K count=1 skip=$(( $RANDOM * 1024 + 1 )) &> /dev/null
 	  DDRC=$?
 	  ETIME=$(date +%s%N)
 
@@ -127,7 +138,7 @@ for DISK in $SASDRIVES ; do
 	  if [ $DDRC != 0 ] ; then
 		  RESULT="failed"
 		  Tellnr "i/o to drive seems to fail - restarting..."
-		  $SG_START -s --readonly /dev/$DISK
+    	  	  $SG_START --pc=1 --readonly /dev/$DISK
 	  elif [ $TIME -lt 300 ] ; then
 		  RESULT="toofast"
 	  else
@@ -145,6 +156,7 @@ for DISK in $SASDRIVES ; do
   SUMMARY+=$(echo -e "\n$DISK\t| $MODEL\t| $CTRLID\t| $RESULT\t| $TIME")
 
   JSONDATA+="{ \"drive\": {  \"model\": \"$MODEL\",  
+	\"sdparm-i\": \"$($SDPARM -i /dev/$DISK | Oneliner)\",
 	\"controller-id\": \"$CTRLID\",  
 	\"controller-slot\": \"$(GetCtrlSlot $DISK)\"  " 
 
@@ -199,6 +211,14 @@ Tell "Run completed. The output is at $OUTPUTJSON."
 # Trim enclosing whitespaces off a string
 Trim () { sed -e 's/^\s*//' -e 's/\s*$//' ; }
 
+# Turn multiline into one liner with | between lines and spaces squeezed
+Oneliner () {
+
+    echo $(paste -sd '|' |			# echo used to squeeze out spaces
+		sed -e 's/\"//g' -e 's/|$//')	# Remove quotes if any and trailing |
+
+}
+
 # Exit with error message
 ScramWith () {
 
@@ -220,6 +240,8 @@ Tellnr() {
 
 # Ask for confirmation
 Yesno() {
+  trap "$(shopt -p nocasematch)" RETURN
+  shopt -u nocasematch
   local RESP
   Tellnr "\nType upper-case YES to proceed:"
   read RESP
@@ -229,9 +251,9 @@ Yesno() {
 
 # Is this a SAS device?
 IsSAS () {
-        [ "$($SMARTCTL -i /dev/${1#'/dev/'} |
-        grep -i protocol |
-        sed -r 's/.*protocol: *(.*) .*/\1/')" == "SAS" ]
+        trap "$(shopt -p nocasematch)" RETURN
+        shopt -s nocasematch
+        [[ $($SDPARM -ip di_target /dev/${1#'/dev/'}) =~ transport:\ serial\ attached\ scsi ]]
 }
 
 # Is this a rotational (vs. solid state) device?
@@ -241,7 +263,9 @@ IsRotational () {
 
 # Is this SAS device spun down (standby_z)?
 IsSBY () {
-        grep -iq "standby condition activated" <<< $($SDPARM --command=sense /dev/${1#'/dev/'})
+        trap "$(shopt -p nocasematch)" RETURN
+        shopt -s nocasematch
+        [[ $($SDPARM --command=sense /dev/${1#'/dev/'}) =~ "standby condition activated" ]]
 }
 
 # Get controller slot ID from an rdevice
@@ -255,6 +279,53 @@ IsArrayStarted () {
 
   ls /mnt/disk[1-9]* &>/dev/null ||
 	[[ ! $(grep -i '^mdstate' $UNRAIDVAR/var.ini) =~ .*=\"STOPPED\" ]]
+}
+
+# Install a "smartctl" plug, to stop Unraid's SMART polls from intefering with our testing
+InstallHook () {
+
+  $DEBUG && Tell "About to install smartctl hook. My PID=$MYPID"
+
+  cat << EOF > ${SMARTCTL}.hook.$MYPID
+#!/bin/bash
+
+# This is a temprary smartctl blocker. Should be in place only for the duration
+# of the sas-util test. If it stayed behind, there's a problem... :-(
+
+# Note - most bash variables are evaluated before file is written; only escaped $ is retained.
+
+if kill -0 $MYPID 2>/dev/null ; then	# Is the calling process still there?
+
+  echo "smartctl is temporarily unavailable... SAS testing is in progress. Please try again later"
+  exit 1
+
+else
+
+  logger -t "$ME" "smartctl blocker inadvertently left behind"
+  mv ${SMARTCTL}.suspended.$MYPID ${SMARTCTL} && {
+    logger -t "$ME" "smartctl blocker sucessfully self-removed"
+    ${SMARTCTL} "\$@"
+    }
+
+fi
+EOF
+
+  chmod 755 ${SMARTCTL}.hook.$MYPID
+  mv ${SMARTCTL} ${SMARTCTL}.suspended.$MYPID && 
+    mv ${SMARTCTL}.hook.$MYPID ${SMARTCTL}
+
+}
+
+Cleanup () {
+
+  $DEBUG && Tell "Cleaning up"
+
+  if [ -f ${SMARTCTL}.suspended.$MYPID ] ; then
+
+    mv ${SMARTCTL}.suspended.$MYPID ${SMARTCTL}
+
+  fi
+
 }
 
 Main "$@"

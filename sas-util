@@ -16,7 +16,7 @@
 #
 # (c) 2020 @doron - CC BY-SA 4.0
 
-VERSION=20201217.01 # Tool version
+VERSION=20201222.02 # Tool version
 
 SMARTCTL=/usr/sbin/smartctl
 SDPARM=/usr/sbin/sdparm
@@ -114,13 +114,28 @@ for DISK in $SASDRIVES ; do
     $SG_START --pc=3 --readonly /dev/$DISK
     sleep 3s
 
-    SENSE1=$(sdparm -C sense /dev/$DISK | Oneliner)
+    SENSE1=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
     
 
     if [[ "$SENSE1" =~ "logical unit not ready" ]] ; then
 	  Tellnr "Drive seems to have STOPped; restarting..."
 	  RESULT=stopping
     	  $SG_START --pc=1 --readonly /dev/$DISK
+          SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
+	  if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
+		Tellnr "Restart with pc=1 does not do it, trying 'start'..."
+		SG_START --start --readonly /dev/$DISK
+		SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
+	  	if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
+			Tellnr "Failed to restart device, reboot will be needed."
+		else
+			Tellnr "Seems to have restarted with 'start'..."
+			RESULT+="; restarted2"
+		fi
+	  else
+		Tellnr "Seems to have restarted with pc=1..."
+		RESULT+="; restarted1"
+	  fi
 
     elif IsSBY $DISK ; then
 	  Tellnr "...spun down. Issuing i/o against drive..."
@@ -156,7 +171,7 @@ for DISK in $SASDRIVES ; do
   SUMMARY+=$(echo -e "\n$DISK\t| $MODEL\t| $CTRLID\t| $RESULT\t| $TIME")
 
   JSONDATA+="{ \"drive\": {  \"model\": \"$MODEL\",  
-	\"sdparm-i\": \"$($SDPARM -i /dev/$DISK | Oneliner)\",
+	\"sdparm-i\": \"$(echo "$($SDPARM -i /dev/$DISK 2>&1)|RC=$?" | Oneliner)\",
 	\"controller-id\": \"$CTRLID\",  
 	\"controller-slot\": \"$(GetCtrlSlot $DISK)\"  " 
 
@@ -253,7 +268,7 @@ Yesno() {
 IsSAS () {
         trap "$(shopt -p nocasematch)" RETURN
         shopt -s nocasematch
-        [[ $($SDPARM -ip di_target /dev/${1#'/dev/'}) =~ transport:\ serial\ attached\ scsi ]]
+        [[ $($SDPARM -ip di_target /dev/${1#'/dev/'} 2>&1) =~ transport:\ serial\ attached\ scsi ]]
 }
 
 # Is this a rotational (vs. solid state) device?
@@ -265,7 +280,7 @@ IsRotational () {
 IsSBY () {
         trap "$(shopt -p nocasematch)" RETURN
         shopt -s nocasematch
-        [[ $($SDPARM --command=sense /dev/${1#'/dev/'}) =~ "standby condition activated" ]]
+        [[ $($SDPARM --command=sense /dev/${1#'/dev/'} 2>&1) =~ "standby condition activated" ]]
 }
 
 # Get controller slot ID from an rdevice

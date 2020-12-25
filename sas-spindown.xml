@@ -4,7 +4,7 @@
 <PluginURL>https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg</PluginURL>
 <PluginAuthor>doron</PluginAuthor>
 <Beta>False</Beta>
-<Category>Tools:System</Category>
+<Category>Tools:System Drivers:</Category>
 <Name>SAS Spindown</Name>
 <Description>
 Spin down idle SAS drives the same way SATA drives are spun down.

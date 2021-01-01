@@ -16,7 +16,7 @@
 #
 # (c) 2020 @doron - CC BY-SA 4.0
 
-VERSION=20201222.02 # Tool version
+VERSION=20201229.01 # Tool version
 
 SMARTCTL=/usr/sbin/smartctl
 SDPARM=/usr/sbin/sdparm
@@ -116,28 +116,7 @@ for DISK in $SASDRIVES ; do
 
     SENSE1=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
     
-
-    if [[ "$SENSE1" =~ "logical unit not ready" ]] ; then
-	  Tellnr "Drive seems to have STOPped; restarting..."
-	  RESULT=stopping
-    	  $SG_START --pc=1 --readonly /dev/$DISK
-          SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
-	  if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
-		Tellnr "Restart with pc=1 does not do it, trying 'start'..."
-		SG_START --start --readonly /dev/$DISK
-		SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
-	  	if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
-			Tellnr "Failed to restart device, reboot will be needed."
-		else
-			Tellnr "Seems to have restarted with 'start'..."
-			RESULT+="; restarted2"
-		fi
-	  else
-		Tellnr "Seems to have restarted with pc=1..."
-		RESULT+="; restarted1"
-	  fi
-
-    elif IsSBY $DISK ; then
+    if IsSBY $DISK ; then
 	  Tellnr "...spun down. Issuing i/o against drive..."
 
 	  echo 1 > /proc/sys/vm/drop_caches	# Make sure Linux not reading from cache
@@ -159,6 +138,27 @@ for DISK in $SASDRIVES ; do
 	  else
 		  RESULT="success"
 	  fi
+
+    elif [[ "$SENSE1" =~ "logical unit not ready" ]] ; then
+	  Tellnr "Drive seems to have STOPped; restarting..."
+	  RESULT=stopping
+    	  $SG_START --pc=1 --readonly /dev/$DISK
+          SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
+	  if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
+		Tellnr "Restart with pc=1 does not do it, trying 'start'..."
+		SG_START --start --readonly /dev/$DISK
+		SENSE2=$(sdparm -C sense /dev/$DISK 2>&1 | Oneliner)
+	  	if [[ "$SENSE2" =~ "logical unit not ready" ]] ; then
+			Tellnr "Failed to restart device, reboot will be needed."
+		else
+			Tellnr "Seems to have restarted with 'start'..."
+			RESULT+="; restarted2"
+		fi
+	  else
+		Tellnr "Seems to have restarted with pc=1..."
+		RESULT+="; restarted1"
+	  fi
+
 
     else
 	  Tellnr "Drive does not seem to spin down..."

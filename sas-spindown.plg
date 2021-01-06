@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.82">
+<!ENTITY version   "0.83">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -15,6 +15,7 @@
 <!ENTITY debugfile  "/tmp/spindownsas-debug">
 <!ENTITY exclusionsURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/exclusions">
 <!ENTITY utilURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-util">
+<!ENTITY copyright      "(c) 2019-2021 @doron - CC BY-SA 4.0">
 ]>
 
 <PLUGIN  name="&name;"
@@ -24,6 +25,9 @@
          support="&support;">
 
 <CHANGES>
+
+###v0.83 2021-01-04
+- Align copyright notices
 
 ###v0.82 2020-12-16
 - In some configurations, SATA drives were mis-classified as SAS drives
@@ -128,6 +132,8 @@ supporting the "-n standby" flag for non-ATA drives (to be fixed in version 7.2)
 #######################################################
 # Is this device on an exclusion list?
 # Bundled, v&version;
+#
+# &copyright;
 
 IsExcluded () {
 
@@ -158,7 +164,7 @@ IsExcluded () {
 #!/bin/bash
 
 # Shared functions for SAS Spindown plugin
-# @doron 2020-10-08
+# &copyright;
 
 VERSION=&version;
 UNRAID_VERSION=$(cat /etc/unraid-version | cut -d '"' -f2)
@@ -259,7 +265,8 @@ GetCtrlID () {
 
 # Spin down/up SAS drives plugin
 # v&version;
-# @doron
+#
+# &copyright;
 
 . &plugindir;/functions
 
@@ -359,7 +366,7 @@ exit 0	# Just in case :-)
 #
 #
 # v&version;
-# @doron 2020-10-20
+# &copyright;
 
 Main () {
 . &plugindir;/functions
@@ -445,7 +452,7 @@ Main "$@"
 # Spin up is not implemented - assumed to "just happen" when i/o is directed at drive.
 #
 # v&version;
-# @doron 2020-08-30
+# &copyright;
 
 . &plugindir;/functions
 
@@ -503,7 +510,7 @@ exit 0
 # and if so, avoid calling smartctl (return silently).
 #
 # v&version;
-# @doron 2020-09-10
+# &copyright;
 
 . &plugindir;/functions
 
@@ -532,6 +539,7 @@ $REALSMART "$@"
 <FILE Name="&plugindir;/&syslogconf;" Mode="644">
 <INLINE>
 # SAS Spindown Assist Plugin v&version;
+# &copyright;
 $RuleSet local
 
 if $msg contains "spindown" and $.sasdone != 1 then {
@@ -557,7 +565,7 @@ if re_match($msg, ".*error: mdcmd.*Input/output error \\(5\\): write.*") or
 #!/bin/bash
 
 # Generate diagnostics for supporting the SAS spindown assist plugin.
-# @doron 2020-10-10 (!)
+# &copyright;
 
 VERSION=&version;
 DIAGFILE=/tmp/sas-spindown-diag.zip

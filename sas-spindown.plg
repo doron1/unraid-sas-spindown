@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.83">
+<!ENTITY version   "0.84">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -21,10 +21,14 @@
 <PLUGIN  name="&name;"
          author="&author;"
          version="&version;"
+         min="6.7.0"
          pluginURL="&pluginURL;"
          support="&support;">
 
 <CHANGES>
+
+###v0.84 2021-01-19
+- Min Unraid version == 6.7.0 (previous didn't have req'd binaries)
 
 ###v0.83 2021-01-04
 - Align copyright notices
@@ -80,6 +84,15 @@ logger -t "&name; plugin" "$@"
 }
 
 Log &name; v&version; installing
+
+which sg_map sg_start smartctl sdparm hdparm &amp;&gt; /dev/null || {
+
+  Log "At least one required binary not found on system."
+  Log "Please make sure all of: sg_map sg_start smartctl sdparm hdparm - are installed."
+  Log "You may want to try the nerdpack plugin for that."
+  exit 1
+
+}
 
 [ -f /usr/sbin/smartctl.wrapper ] &amp;&amp; {
 	Log "Removing leftover smartctl wrapper..."
@@ -543,8 +556,8 @@ $REALSMART "$@"
 $RuleSet local
 
 if $msg contains "spindown" and $.sasdone != 1 then {
-	^&sysloghook;
 	set $.sasdone = 1 ;
+	^&sysloghook;
 	}
 	
 # Some SAS devices spew errors when hit with ATA spindown opcode; filter out

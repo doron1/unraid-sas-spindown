@@ -14,9 +14,9 @@
 #
 # Unraid environment is assumed.
 #
-# (c) 2020 @doron - CC BY-SA 4.0
+# (c) 2020-2021 @doron - CC BY-SA 4.0
 
-VERSION=20201229.01 # Tool version
+VERSION=20210201.01 # Tool version
 
 SMARTCTL=/usr/sbin/smartctl
 SDPARM=/usr/sbin/sdparm
@@ -33,6 +33,7 @@ ME=$(basename $0)
 MYPID=$$
 
 UNRAIDVAR=/var/local/emhttp
+UNRAIDVERSION=$(cat /etc/unraid-version | cut -d '"' -f2)
 
 OUTPUTJSON=/tmp/sas-util-out
 
@@ -198,7 +199,7 @@ Tell "\n$SUMMARY"
 CONTROLLERS=$(echo "$CONTROLLERS" | tr ' ' '\n' | sort | uniq)
 
 
-$JQ . <<< $(echo "{\"utility-run\": { \"date\": \"$(date +"%Y%m%d-%H:%M %Z")\", \"version\": \"$VERSION\" , \"message\":\"$EXTRATEXT\", \"drives\": 
+$JQ . <<< $(echo "{\"utility-run\": { \"date\": \"$(date +"%Y%m%d-%H:%M %Z")\", \"version\": \"$VERSION\" , \"Unraid version\": \"$UNRAIDVERSION\" , \"message\":\"$EXTRATEXT\", \"drives\": 
 	[ $JSONDATA ] } }"
 	) > $OUTPUTJSON
 

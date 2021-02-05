@@ -32,6 +32,9 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2021-02-06 v0.85      In some configurations, the latest version of "exclusions" file was not
+                      being pulled in. Thanks @xaositek.
+
 2020-12-16 v0.82      In some configurations, SATA drives were mis-classified as SAS drives
 
 2020-12-11 v0.8       Update for Unraid 6.9.0, use new spin up/down hook. Plugin now supports 

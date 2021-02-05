@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.84">
+<!ENTITY version   "0.85">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -26,6 +26,9 @@
          support="&support;">
 
 <CHANGES>
+
+###v0.85 2021-02-06
+- Failed to pull latest "exclusions" file in some installation scenarios. Thanks @xaositek.
 
 ###v0.84 2021-01-19
 - Min Unraid version == 6.7.0 (previous didn't have req'd binaries)
@@ -690,13 +693,13 @@ else
   Log "Installing syslog hook for SAS device spindown..."
   &plugindir;/sas-spindown-config-syslog install
 
-  wget -q -t 3 -O &plugindir;/exclusions.latest &exclusionsURL; &amp;&amp; {
+fi
+
+wget -q -t 3 -O &plugindir;/exclusions.latest &exclusionsURL; &amp;&amp; {
 
     Log "Retrieved the latest exclusions file..."
     install &plugindir;/exclusions.latest -m 755 -Dt &pluginpermdir;
   }
-
-fi
 
 [ -f &pluginpermdir;/exclusions.latest ] &amp;&amp; {
   Log "Installing most recent exclusions file..."

@@ -1,7 +1,7 @@
 #!/bin/bash
 #######################################################
 # Is this device on an exclusion list?
-# 2020-12-23-01
+# 2021-02-17-01
 # (c) 2019-2021 @doron - CC BY-SA 4.0
 
 IsExcluded () {
@@ -22,6 +22,7 @@ IsExcluded () {
   [[ "$MODEL" =~ X422_[A-Z0-9]{5}600A10 ]] ||	# Netapp rebrands of the Hitachi
   [[ "${MODEL}:${REV}" =~ MB8000JFECQ:HPD[4-7] ]] ||	# HPE MB8000JFECQ
   [[ "${MODEL}:${REV}" =~ MBF2300RC:DA07 ]] ||	# Toshiba MBF2300RC (20201223)
+  [[ "$CTRLID" == "1000:0087:1590:0042" ]] || 	# HPE H221 (9207-8e) (20210217)
   false						# End the || chain
 
 }

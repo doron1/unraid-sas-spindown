@@ -23,6 +23,7 @@ IsExcluded () {
   [[ "${MODEL}:${REV}" =~ MB8000JFECQ:HPD[4-7] ]] ||	# HPE MB8000JFECQ
   [[ "${MODEL}:${REV}" =~ MBF2300RC:DA07 ]] ||	# Toshiba MBF2300RC (20201223)
   [[ "$CTRLID" == "1000:0087:1590:0042" ]] || 	# HPE H221 (9207-8e) (20210217)
+  [[ "$CTRLID" == "9005:8076:15d9:1600" ]] || 	# SM/Adaptec (20210326) (hattip @half)
   false						# End the || chain
 
 }

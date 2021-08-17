@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.85">
+<!ENTITY version   "0.86">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -26,6 +26,10 @@
          support="&support;">
 
 <CHANGES>
+
+###v0.86 2021-08-17
+- With Unraid 6.10, some drives were spinning back up immediately. Reworked "IsSAS" logic to pre-detect drive types.
+- Streamline sdspin's exit code logic (basically aesthetics, no functional change in real world)
 
 ###v0.85 2021-02-06
 - Failed to pull latest "exclusions" file in some installation scenarios. Thanks @xaositek.
@@ -115,7 +119,7 @@ which sg_map sg_start smartctl sdparm hdparm &amp;&gt; /dev/null || {
 # Remove the syslog configurator if running in bg
 pkill sas-spindown
 
-rm -f &plugindir;/*
+rm -fr &plugindir;/*
 
 </INLINE>
 </FILE>
@@ -196,6 +200,8 @@ LSPCI=/sbin/lspci
 DEBUG=&debug;
 [ -f &debugfile; ] &amp;&amp; DEBUG=true
 
+. &plugindir;/drive_types
+
 # Trim enclosing whitespaces off a string
 Trim () { sed -e 's/^\s*//' -e 's/\s*$//' ; }
 
@@ -212,9 +218,13 @@ Version_compare () {
 
 # Is this a SAS device?
 IsSAS () {
-	trap "$(shopt -p nocasematch)" RETURN
-        shopt -s nocasematch
-        [[ $($SDPARM -ip di_target /dev/${1#'/dev/'} 2&gt;&amp;1 ) =~ transport:\ serial\ attached\ scsi ]]
+        if [ -n "${DRIVE_TYPE[${1#'/dev/'}]}" ] ; then          # If we've already looked at this drive...
+                [ "${DRIVE_TYPE[${1#'/dev/'}]}" == "SAS" ]      # Return the rc from this comparison
+        else
+                trap "$(shopt -p nocasematch)" RETURN
+                shopt -s nocasematch
+        	[[ $($SDPARM -ip di_target /dev/${1#'/dev/'} 2&gt;&amp;1 ) =~ transport:\ serial\ attached\ scsi ]]
+        fi
 }
 
 # Is this a rotational (vs. solid state) device?
@@ -288,6 +298,7 @@ GetCtrlID () {
 
 RDEVNAME=/dev/${1#'/dev/'}	# So that we can be called with either "sdk" or "/dev/sdk"
 
+RC=0
 case ${2,,} in
 
   "up")
@@ -296,11 +307,13 @@ case ${2,,} in
 
       $DEBUG &amp;&amp; echo $SG_START -rp1 $RDEVNAME
       $SG_START -rp1 $RDEVNAME &gt; /dev/null
+      RC=$?
 
     else
 
       $DEBUG &amp;&amp; echo $HDPARM -S0 $RDEVNAME
       $HDPARM -S0 $RDEVNAME &gt; /dev/null
+      RC=$?
 
     fi
   ;;
@@ -315,13 +328,14 @@ case ${2,,} in
           Log "Spinning down device $RDEVNAME"
           $DEBUG &amp;&amp; echo $SG_START -rp3 $RDEVNAME
           $SG_START -rp3 $RDEVNAME &gt; /dev/null
+          RC=$?
 
         fi
 
       else
 
 	Log "Device $RDEVNAME cannot be spun down - excluded"
-        exit 1
+        RC=1
 
       fi
 
@@ -329,6 +343,7 @@ case ${2,,} in
 
       $DEBUG &amp;&amp; echo $HDPARM -y $RDEVNAME
       $HDPARM -y $RDEVNAME &gt; /dev/null
+      RC=$?
 
     fi
   ;;
@@ -339,7 +354,7 @@ case ${2,,} in
 
       OUTPUT=$($SDPARM -C sense $RDEVNAME 2&gt;&amp;1)
       if [[ ${OUTPUT,,} =~ "standby condition activated" ]] ; then
-	exit 2
+	RC=2
       fi
 
     else
@@ -348,7 +363,7 @@ case ${2,,} in
       if [[ $? == 0 &amp;&amp;
             ${OUTPUT,,} =~ "standby" &amp;&amp; 
             ! ${OUTPUT,,} =~ "bad/missing sense" ]] ; then
-        exit 2
+        RC=2
       fi
 
     fi
@@ -356,12 +371,12 @@ case ${2,,} in
 
   *)
     Log "Invalid op code $2"
-    exit 1
+    RC=1
   ;;
 
 esac
 
-exit 0	# Just in case :-)
+exit $RC
    
 </INLINE>
 </FILE>
@@ -643,6 +658,40 @@ echo "*** SAS-Spindown plugin diagnostics now available in $DIAGFILE."
 
 </INLINE>
 </FILE>
+<FILE Name="&plugindir;/event/array_started" Mode="755">
+<INLINE>
+#!/bin/bash
+#
+# Build a list of drive types - SAS or otherwise.
+#
+# This script is initiated from emhttpd, using the "Array Started" event upcall
+
+# Spin down/up SAS drives plugin
+
+# v&version;
+# &copyright;
+
+. &plugindir;/functions
+
+DRIVE_TYPES=&plugindir;/drive_types
+
+shopt -s nocasematch
+
+echo -e "#!/bin/bash\n\n# Automatically generated, $(date)\n\ndeclare -A DRIVE_TYPE" &gt; $DRIVE_TYPES
+
+lsblk -So PATH,TYPE |
+  grep -Po ".*(?= disk$)" |
+  while read DISK ; do 
+
+	if [[ $($SDPARM -ip di_target $DISK 2&gt;&amp;1 ) =~ transport:\ serial\ attached\ scsi ]] ; then
+		echo "DRIVE_TYPE[${DISK#'/dev/'}]=SAS" &gt;&gt; $DRIVE_TYPES
+	else
+		echo "DRIVE_TYPE[${DISK#'/dev/'}]=OTHER" &gt;&gt; $DRIVE_TYPES
+	fi
+  done
+</INLINE>
+
+</FILE>
 
 <FILE Run="/bin/bash" Method="install">
 <INLINE>
@@ -715,6 +764,10 @@ wget -q -t 3 -O &plugindir;/sas-util &utilURL; &amp;&amp; {
   Log "Installing sas-util..."
   install &pluginpermdir;/sas-util -m 755 -Dt &plugindir;
 }
+
+Log "Populating drive types table..."
+&plugindir;/event/array_started
+
 exit 0
 </INLINE>
 </FILE>

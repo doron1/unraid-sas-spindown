@@ -32,10 +32,13 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2022.04.25            Change version numbering to match common plugin wisdom.
+                      Minor code tidy-ups.
+
 2021-08-17 v0.86      With Unraid 6.10, *some* SAS drives were spinning back up immediately;
                       probably due to changes in the SAS controller driver.
                       SAS drive detection logic revamped to work around the bug.
-                      Also streamined the exit code logic in sdspin.
+                      Also streamlined the exit code logic in sdspin.
 
 2021-02-06 v0.85      In some configurations, the latest version of "exclusions" file was not
                       being pulled in. Thanks @xaositek.

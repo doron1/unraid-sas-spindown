@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "0.86">
+<!ENTITY version   "2022.04.25">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -11,6 +11,7 @@
 <!ENTITY sysloghook "&plugindir;/sysloghook">
 <!ENTITY syslogconf "99-spinsasdown.conf">
 <!ENTITY emhttphookdir "/usr/local/sbin">
+<!ENTITY prereqs "sg_map sg_start smartctl sdparm hdparm">
 <!ENTITY debug      "false">
 <!ENTITY debugfile  "/tmp/spindownsas-debug">
 <!ENTITY exclusionsURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/exclusions">
@@ -26,6 +27,10 @@
          support="&support;">
 
 <CHANGES>
+
+###v2022.04.25
+- Change version numbering to match common plugin wisdom
+- Minor code tidy-ups
 
 ###v0.86 2021-08-17
 - With Unraid 6.10, some drives were spinning back up immediately. Reworked "IsSAS" logic to pre-detect drive types.
@@ -92,10 +97,10 @@ logger -t "&name; plugin" "$@"
 
 Log &name; v&version; installing
 
-which sg_map sg_start smartctl sdparm hdparm &amp;&gt; /dev/null || {
+which &prereqs; &amp;&gt; /dev/null || {
 
-  Log "At least one required binary not found on system."
-  Log "Please make sure all of: sg_map sg_start smartctl sdparm hdparm - are installed."
+  Log "Error: At least one required binary not found on system."
+  Log "Please make sure all of: &prereqs; - are installed."
   Log "You may want to try the nerdpack plugin for that."
   exit 1
 
@@ -134,13 +139,11 @@ schedule.
 
 This plugin assists the Unraid built-in disk spin down mechanism, by adding 
 functionality supporting SAS drives (Unraid OS natively supports spinning down
-SATA drives).
-For Unraid version 6.9.0 and up, it enhances the built-in sdspin script with 
+SATA drives). SAS drives are spun down by sending a standby_z, aka powermode 3, command.
+For Unraid version 6.9.0 and up, the built-in sdspin script is enhanced with 
 SAS support.
-For Unraid versions up until 6.8.3, it installs two main components: One is 
-a hook triggered whenever Unraid decides to spin down a drive; if the drive is SAS, 
-it spins it down (STANDBY, powermode 3). This is done via an rsyslog hook, 
-following Unraid's log messages of spinning down a drive.
+For Unraid versions up until 6.8.3, the plugin installs two main components: 
+One is a syslog hook triggered whenever Unraid decides to spin down a drive; 
 The second part is a wrapper for "smartctl", working around its deficiency of not
 supporting the "-n standby" flag for non-ATA drives (to be fixed in version 7.2).
 </INLINE>
@@ -200,7 +203,7 @@ LSPCI=/sbin/lspci
 DEBUG=&debug;
 [ -f &debugfile; ] &amp;&amp; DEBUG=true
 
-. &plugindir;/drive_types
+. &plugindir;/drive_types 2&gt; /dev/null
 
 # Trim enclosing whitespaces off a string
 Trim () { sed -e 's/^\s*//' -e 's/\s*$//' ; }
@@ -658,13 +661,14 @@ echo "*** SAS-Spindown plugin diagnostics now available in $DIAGFILE."
 
 </INLINE>
 </FILE>
-<FILE Name="&plugindir;/event/array_started" Mode="755">
+<FILE Name="&plugindir;/build_drive_types" Mode="755">
 <INLINE>
 #!/bin/bash
 #
 # Build a list of drive types - SAS or otherwise.
 #
-# This script is initiated from emhttpd, using the "Array Started" event upcall
+# This script is executed upon plugin install (incl. reboot), and
+# when the array is started.
 
 # Spin down/up SAS drives plugin
 
@@ -690,7 +694,23 @@ lsblk -So PATH,TYPE |
 	fi
   done
 </INLINE>
+</FILE>
 
+<FILE Name="&plugindir;/event/array_started" Mode="755">
+<INLINE>
+#!/bin/bash
+#
+# This script is initiated from emhttpd, using the "Array Started" event upcall
+# Build a list of drive types - SAS or otherwise.
+
+# Spin down/up SAS drives plugin
+
+# v&version;
+# &copyright;
+
+&plugindir;/build_drive_types
+
+</INLINE>
 </FILE>
 
 <FILE Run="/bin/bash" Method="install">
@@ -766,7 +786,7 @@ wget -q -t 3 -O &plugindir;/sas-util &utilURL; &amp;&amp; {
 }
 
 Log "Populating drive types table..."
-&plugindir;/event/array_started
+&plugindir;/build_drive_types
 
 exit 0
 </INLINE>

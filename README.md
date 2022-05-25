@@ -32,6 +32,9 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2022.05.25            Issue some more debug messages to syslog (vs. interactive "echo") 
+                      when debug is set
+
 2022.04.25            Change version numbering to match common plugin wisdom.
                       Minor code tidy-ups.
 

@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "2022.04.25">
+<!ENTITY version   "2022.05.25">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -27,6 +27,9 @@
          support="&support;">
 
 <CHANGES>
+
+###v2022.05.25
+- Issue some more debug messages to syslog (vs. interactive "echo") when debug is set
 
 ###v2022.04.25
 - Change version numbering to match common plugin wisdom
@@ -308,13 +311,13 @@ case ${2,,} in
 
     if IsSAS $RDEVNAME ; then
 
-      $DEBUG &amp;&amp; echo $SG_START -rp1 $RDEVNAME
+      $DEBUG &amp;&amp; Log "debug: $SG_START -rp1 $RDEVNAME"
       $SG_START -rp1 $RDEVNAME &gt; /dev/null
       RC=$?
 
     else
 
-      $DEBUG &amp;&amp; echo $HDPARM -S0 $RDEVNAME
+      $DEBUG &amp;&amp; Log "debug: $HDPARM -S0 $RDEVNAME"
       $HDPARM -S0 $RDEVNAME &gt; /dev/null
       RC=$?
 
@@ -329,7 +332,7 @@ case ${2,,} in
         if IsRotational $RDEVNAME ; then
 
           Log "Spinning down device $RDEVNAME"
-          $DEBUG &amp;&amp; echo $SG_START -rp3 $RDEVNAME
+          $DEBUG &amp;&amp; Log "debug: $SG_START -rp3 $RDEVNAME"
           $SG_START -rp3 $RDEVNAME &gt; /dev/null
           RC=$?
 
@@ -344,7 +347,7 @@ case ${2,,} in
 
     else  # Not SAS
 
-      $DEBUG &amp;&amp; echo $HDPARM -y $RDEVNAME
+      $DEBUG &amp;&amp; Log "debug: $HDPARM -y $RDEVNAME"
       $HDPARM -y $RDEVNAME &gt; /dev/null
       RC=$?
 
@@ -750,7 +753,7 @@ fi
 
 if $NEW_FORMAT ; then
 
-  Log "Unraid version $UNRAID_VERSION detected, using new method (emhttp hook)"
+  Log "Unraid version $UNRAID_VERSION detected, using post-6.9 method (emhttp hook)"
   Log "Installing SAS spindown/up script sdspin..."
   [ -f &emhttphookdir;/sdspin.unraid ] ||
     mv &emhttphookdir;/sdspin &emhttphookdir;/sdspin.unraid

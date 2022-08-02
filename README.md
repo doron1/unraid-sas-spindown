@@ -32,6 +32,8 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2022.08.02            Align return codes from "sdspin" (also per 6.11 changes)
+
 2022.05.25            Issue some more debug messages to syslog (vs. interactive "echo") 
                       when debug is set
 

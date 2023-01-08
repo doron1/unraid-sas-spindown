@@ -7,7 +7,7 @@ longevity) by spinning down drives. That works very well for SATA drives;
 however SAS drives are quite peculiar in their power mode controls. Specifically
 they do not respond to ATA standby (spin down) commands.
 
-This plugin add SAS drive spin down support to Unraid. 
+This plugin adds SAS drive spin down support to Unraid. 
 
 The plugin is installed in two very differnt ways, depending on the Unraid OS
 version. For versions up until v6.8.3, the plugin installs two components: 

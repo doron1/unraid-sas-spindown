@@ -14,9 +14,9 @@
 #
 # Unraid environment is assumed.
 #
-# (c) 2020-2021 @doron - CC BY-SA 4.0
+# (c) 2020-2024 @doron - CC BY-SA 4.0
 
-VERSION=20210201.01 # Tool version
+VERSION=20240218.01 # Tool version
 
 SMARTCTL=/usr/sbin/smartctl
 SDPARM=/usr/sbin/sdparm
@@ -56,7 +56,7 @@ shopt -s nocasematch
 # Collect all mechanical SAS drives
 SASDRIVES=""
 
-for DISK in $(ls -la /dev/disk/by-path/*-sas-* | egrep -v "part[0-9]+ " | sed 's/.*\///') ; do
+for DISK in $(ls -la /dev/disk/by-path/* | egrep -v "part[0-9]+ " | sed 's/.*\///') ; do
 
   if IsSAS $DISK && IsRotational $DISK ; then 
 	SASDRIVES+=" $DISK" 

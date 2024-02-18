@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "2022.08.02">
+<!ENTITY version   "2024.02.18">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -16,7 +16,7 @@
 <!ENTITY debugfile  "/tmp/spindownsas-debug">
 <!ENTITY exclusionsURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/exclusions">
 <!ENTITY utilURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-util">
-<!ENTITY copyright      "(c) 2019-2022 @doron - CC BY-SA 4.0">
+<!ENTITY copyright      "(c) 2019-2024 @doron - CC BY-SA 4.0">
 ]>
 
 <PLUGIN  name="&name;"
@@ -27,6 +27,9 @@
          support="&support;">
 
 <CHANGES>
+
+###v2024.02.18
+- Fix sas-util to accomodate for controller/drivers designating the drives' paths as "scsi" not "sas"
 
 ###v2022.08.02
 - Align return codes from "sdspin" (also per 6.11 changes)

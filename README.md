@@ -32,6 +32,9 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2024.02.18            Fix sas-util to accomodate for controller/drivers designating
+                      the drives' paths as "scsi" not "sas"
+
 2022.08.02            Align return codes from "sdspin" (also per 6.11 changes)
 
 2022.05.25            Issue some more debug messages to syslog (vs. interactive "echo") 

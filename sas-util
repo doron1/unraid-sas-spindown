@@ -25,6 +25,7 @@ MDCMD=/usr/local/sbin/mdcmd
 SG_START=/usr/bin/sg_start
 DD=/usr/bin/dd
 JQ=/usr/bin/jq
+SAS_SPUNDOWN_SENSE_RE='(standby condition activated|notify \(enable spinup\) required)'
 
 DEBUG=false
 #DEBUG=true
@@ -281,7 +282,7 @@ IsRotational () {
 IsSBY () {
         trap "$(shopt -p nocasematch)" RETURN
         shopt -s nocasematch
-        [[ $($SDPARM --command=sense /dev/${1#'/dev/'} 2>&1) =~ "standby condition activated" ]]
+        [[ $($SDPARM --command=sense /dev/${1#'/dev/'} 2>&1) =~ $SAS_SPUNDOWN_SENSE_RE ]]
 }
 
 # Get controller slot ID from an rdevice

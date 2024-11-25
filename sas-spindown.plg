@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "sas-spindown">
 <!ENTITY author    "doron">
-<!ENTITY version   "2024.02.18">
+<!ENTITY version   "2024.11.25">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/doron1/unraid-sas-spindown/master/sas-spindown.plg">
 <!ENTITY plugindir "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginpermdir "/boot/config/plugins/&name;">
@@ -27,6 +27,9 @@
          support="&support;">
 
 <CHANGES>
+
+###v2024.11.25
+- Improve indication of a spun-down drive to accomodate some Seagate drives which produce different sense data. No change of functionality for these drives unfortunately - just the status monitoring
 
 ###v2024.02.18
 - Fix sas-util to accomodate for controller/drivers designating the drives' paths as "scsi" not "sas"
@@ -212,6 +215,9 @@ LSPCI=/sbin/lspci
 DEBUG=&debug;
 [ -f &debugfile; ] &amp;&amp; DEBUG=true
 
+# Regex for sense data indicating "spun down" SAS drive
+SAS_SPUNDOWN_SENSE_RE='(standby condition activated|notify \(enable spinup\) required)'
+
 . &plugindir;/drive_types 2&gt; /dev/null
 
 # Trim enclosing whitespaces off a string
@@ -248,7 +254,7 @@ IsRotational () {
 IsSBY () {
   if IsSAS ${1#'/dev/'} ; then
 	local OUTPUT=$($SDPARM -C sense /dev/${1#'/dev/'} 2&gt;&amp;1)
-	[[ ${OUTPUT,,} =~ "standby condition activated" ]]
+	[[ ${OUTPUT,,} =~ $SAS_SPUNDOWN_SENSE_RE ]]
   else
 	local OUTPUT=$($HDPARM -C /dev/${1#'/dev/'} 2&gt;&amp;1)
 	[[ $? == 0 &amp;&amp;
@@ -374,7 +380,7 @@ case ${2,,} in
       OUTPUT=$($SDPARM -C sense $RDEVNAME 2&gt;&amp;1)
       if [[ $? != 0 ]] ; then
          RC=1
-      elif [[ ${OUTPUT,,} =~ "standby condition activated" ]] ; then
+      elif [[ ${OUTPUT,,} =~ $SAS_SPUNDOWN_SENSE_RE ]] ; then
 	 RC=2
       fi
       $DEBUG &amp;&amp;  { Log "debug: $SDPARM -C sense $RDEVNAME"

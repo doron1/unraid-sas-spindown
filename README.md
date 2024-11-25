@@ -32,6 +32,10 @@ USE AT YOUR OWN RISK.
 ```
 ## Change Log:
 ```
+2024.11.25            Improve indication of a spun-down drive to accomodate some Seagate 
+                      drives which produce different sense data. No change to functionality 
+                      for these drives unfortunately - just the status monitoring
+
 2024.02.18            Fix sas-util to accomodate for controller/drivers designating
                       the drives' paths as "scsi" not "sas"
 
